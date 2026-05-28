@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ระบบพิมพ์สติ๊กเกอร์วันหมดอายุ | Smart Hospital</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: { primary: '#1e3a8a', secondary: '#2563eb', light: '#f8fafc' }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-slate-50 font-sans text-slate-800 antialiased flex flex-col min-h-screen">
+
+    <div id="toast-container" class="fixed top-5 right-5 z-50 flex flex-col gap-2"></div>
+
+    <div id="loading-overlay" class="fixed inset-0 bg-slate-900 bg-opacity-50 z-50 flex flex-col items-center justify-center hidden backdrop-blur-sm">
+        <i class="fas fa-circle-notch fa-spin text-4xl text-white mb-4"></i>
+        <p class="text-white text-lg font-medium tracking-wide">กำลังประมวลผลข้อมูล...</p>
+    </div>
+
+    <nav class="bg-primary text-white shadow-lg sticky top-0 z-40">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between h-16">
+                <div class="flex items-center gap-3">
+                    <i class="fas fa-hospital text-2xl text-blue-200"></i>
+                    <span class="font-bold text-xl tracking-wide">MedLabel Pro</span>
+                </div>
+                <div class="flex items-center gap-4">
+                    <button onclick="switchTab('print')" class="hover:text-blue-200 transition-colors font-medium"><i class="fas fa-print mr-2"></i>พิมพ์สติ๊กเกอร์</button>
+                    <button onclick="switchTab('manage')" class="hover:text-blue-200 transition-colors font-medium"><i class="fas fa-box mr-2"></i>จัดการรายการ</button>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <main class="flex-grow max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full">
+        
+        <section id="tab-print" class="block">
+            <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+                <h2 class="text-2xl font-bold text-slate-800 border-b pb-4 mb-6"><i class="fas fa-search-plus mr-3 text-secondary"></i>ค้นหาและพิมพ์สติ๊กเกอร์</h2>
+                
+                <div class="mb-6 relative">
+                    <input type="text" id="searchInput" onkeyup="filterItems()" placeholder="ค้นหาชื่อน้ำยา, สารน้ำ, ยาเย็น..." 
+                           class="w-full pl-12 pr-4 py-3 rounded-lg border border-slate-300 focus:ring-2 focus:ring-secondary focus:border-secondary transition-shadow text-lg">
+                    <i class="fas fa-search absolute left-4 top-4 text-slate-400 text-lg"></i>
+                </div>
+
+                <div id="itemsGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    </div>
+            </div>
+        </section>
+
+        <section id="tab-manage" class="hidden">
+            <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+                <div class="flex justify-between items-center border-b pb-4 mb-6">
+                    <h2 class="text-2xl font-bold text-slate-800"><i class="fas fa-database mr-3 text-secondary"></i>ฐานข้อมูลรายการ</h2>
+                    <button onclick="openModal('addItemModal')" class="bg-secondary hover:bg-primary text-white px-5 py-2 rounded-lg font-medium transition-colors shadow-md">
+                        <i class="fas fa-plus mr-2"></i>เพิ่มรายการใหม่
+                    </button>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="min-w-full divide-y divide-slate-200">
+                        <thead class="bg-slate-50">
+                            <tr>
+                                <th class="px-6 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">ชื่อรายการ</th>
+                                <th class="px-6 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">ประเภท</th>
+                                <th class="px-6 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">อายุหลังเปิด</th>
+                            </tr>
+                        </thead>
+                        <tbody id="manageTableBody" class="bg-white divide-y divide-slate-200">
+                            </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer class="bg-white border-t border-slate-200 py-6 mt-auto">
+        <div class="max-w-7xl mx-auto px-4 text-center text-slate-500 text-sm font-medium">
+            © 2026 Developed By Natnarinthorn | Enterprise Healthcare System
+        </div>
+    </footer>
+
+    <div id="printModal" class="fixed inset-0 bg-slate-900 bg-opacity-50 z-50 hidden items-center justify-center backdrop-blur-sm">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-4xl flex flex-col md:flex-row overflow-hidden max-h-[90vh]">
+            <div class="p-8 w-full md:w-1/2 border-b md:border-b-0 md:border-r border-slate-200 overflow-y-auto">
+                <div class="flex justify-between items-center mb-6">
+                    <h3 class="text-xl font-bold text-slate-800">ข้อมูลการเปิดใช้งาน</h3>
+                    <button onclick="closeModal('printModal')" class="text-slate-400 hover:text-red-500"><i class="fas fa-times text-xl"></i></button>
+                </div>
+                
+                <h4 id="selectedItemName" class="text-lg font-semibold text-primary mb-2"></h4>
+                <p id="selectedItemRule" class="text-sm text-slate-500 mb-6 bg-slate-50 p-3 rounded-md border border-slate-100"></p>
+
+                <div class="space-y-5">
+                    <div>
+                        <label class="block text-sm font-bold text-slate-700 mb-1">วันที่เปิดใช้งาน</label>
+                        <input type="date" id="openDate" onchange="calculatePreview()" class="w-full px-4 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-secondary">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-bold text-slate-700 mb-1">เวลาเปิดใช้งาน</label>
+                        <input type="time" id="openTime" onchange="calculatePreview()" class="w-full px-4 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-secondary">
+                    </div>
+                    
+                    <div id="manualExpireDiv" class="hidden">
+                        <label class="block text-sm font-bold text-red-600 mb-1">ระบุวันหมดอายุ (ตามสลาก)</label>
+                        <input type="date" id="manualExpireDate" onchange="calculatePreview()" class="w-full px-4 py-2 rounded-lg border border-red-300 focus:ring-2 focus:ring-red-500">
+                    </div>
+                </div>
+            </div>
+
+            <div class="p-8 w-full md:w-1/2 bg-slate-50 flex flex-col items-center justify-center">
+                <h3 class="text-lg font-bold text-slate-700 mb-4">ตัวอย่างสติ๊กเกอร์ (2x1 นิ้ว)</h3>
+                
+                <div class="label-preview bg-white shadow-md border border-slate-300 p-2 relative" id="printableArea">
+                    <div class="label-content border-2 border-black p-1 h-full flex flex-col justify-between">
+                        <div class="text-[12px] font-bold leading-tight line-clamp-2" id="lbl-name">-</div>
+                        <div class="flex justify-between items-center text-[9px] mt-1 border-t border-dashed border-gray-400 pt-1">
+                            <span><b>เปิด:</b> <span id="lbl-open-date">-</span></span>
+                            <span><span id="lbl-open-time">-</span></span>
+                        </div>
+                        <div class="flex justify-between items-center text-[10px] mt-1 bg-black text-white px-1">
+                            <span><b>หมดอายุ:</b> <span id="lbl-exp-date">-</span></span>
+                            <span><span id="lbl-exp-time">-</span></span>
+                        </div>
+                        <div class="text-[8px] text-center mt-1" id="lbl-details"></div>
+                    </div>
+                </div>
+
+                <div class="mt-8 w-full">
+                    <button onclick="executePrint()" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-lg shadow-lg transition-colors flex justify-center items-center gap-2 text-lg">
+                        <i class="fas fa-print"></i> พิมพ์สติ๊กเกอร์
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
