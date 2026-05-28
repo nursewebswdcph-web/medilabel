@@ -16,6 +16,10 @@ concurrency:
 
 jobs:
   deploy:
+    # 🟢 เพิ่ม environment ตรงนี้เพื่อแก้ Error
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -30,4 +34,5 @@ jobs:
           path: '.'
 
       - name: Deploy to GitHub Pages
+        id: deployment # 🟢 เพิ่ม id เพื่อให้ผูกกับ url ด้านบน
         uses: actions/deploy-pages@v4.0.5
