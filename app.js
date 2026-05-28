@@ -1,397 +1,700 @@
-// ==========================================
-// Configuration & State
-// ==========================================
-const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbxzDMcrJwOGIVv9rH8pJ4IwagNeUziG4V8-UfZFt574gnzG0c_rDyaZLhpzfAfk_sf8/exec'; // แทนที่ด้วย URL ของคุณ
-let appState = {
-    items: [],
-    selectedItem: null
+const GAS_API_URL = "https://script.google.com/macros/s/AKfycbxzDMcrJwOGIVv9rH8pJ4IwagNeUziG4V8-UfZFt574gnzG0c_rDyaZLhpzfAfk_sf8/exec";
+const CACHE_KEY = "medlabel.items.cache.v1";
+const CACHE_TTL_MS = 5 * 60 * 1000;
+const DEFAULT_ICON = "icon.png";
+const DEFAULT_CATEGORIES = ["น้ำยา", "สารน้ำ", "ยาเย็น", "ยาน้ำ", "สารละลาย", "อื่นๆ ระบุ"];
+
+const state = {
+  items: [],
+  selectedItem: null,
+  category: "all",
+  homeQuery: "",
+  manageQuery: "",
+  imageData: "",
+  pendingDeleteId: ""
 };
 
-// ==========================================
-// Initialization & API Calls
-// ==========================================
-document.addEventListener('DOMContentLoaded', () => {
-    setDefaultDateTime();
-    fetchItems();
-});
+document.addEventListener("DOMContentLoaded", init);
 
-async function fetchItems() {
-    showLoading(true);
-    try {
-        const response = await fetch(`${GAS_API_URL}?action=getItems`);
-        const result = await response.json();
-        if(result.status === 'success') {
-            appState.items = result.data;
-            renderItemsGrid(appState.items);
-            renderManageTable(appState.items);
-        }
-    } catch (error) {
-        showToast('เกิดข้อผิดพลาดในการโหลดข้อมูล', 'error');
-    } finally {
-        showLoading(false);
-    }
+async function init() {
+  bindEvents();
+  bindModalDismiss();
+  renderSkeleton();
+  setDefaultDateTime();
+
+  const cached = getCachedItems();
+  if (cached.length) {
+    setItems(cached);
+    renderAll();
+  }
+
+  await loadItems({ quiet: cached.length > 0 });
 }
 
-// ==========================================
-// UI Rendering & Manipulation
-// ==========================================
-function switchTab(tabId) {
-    document.getElementById('tab-print').style.display = tabId === 'print' ? 'block' : 'none';
-    document.getElementById('tab-manage').style.display = tabId === 'manage' ? 'block' : 'none';
+function bindEvents() {
+  document.querySelectorAll("[data-tab]").forEach((button) => {
+    button.addEventListener("click", () => switchTab(button.dataset.tab));
+  });
+
+  qs("#refreshBtn").addEventListener("click", () => loadItems());
+  qs("#addItemBtn").addEventListener("click", openCreateItemModal);
+  qs("#closePrintBtn").addEventListener("click", () => closeModal("printModal"));
+  qs("#printBtn").addEventListener("click", executePrint);
+  qs("#itemForm").addEventListener("submit", saveItem);
+  qs("#itemImage").addEventListener("change", handleImageChange);
+  qs("#itemCategory").addEventListener("change", syncCustomCategoryInput);
+  qs("#clearImageBtn").addEventListener("click", clearImage);
+  qs("#shelfLifeUnit").addEventListener("change", syncShelfLifeInput);
+  qs("#cancelDeleteBtn").addEventListener("click", () => closeModal("confirmModal"));
+  qs("#confirmDeleteBtn").addEventListener("click", deleteSelectedItem);
+
+  qs("#homeSearch").addEventListener("input", debounce((event) => {
+    state.homeQuery = event.target.value;
+    renderHome();
+  }));
+
+  qs("#manageSearch").addEventListener("input", debounce((event) => {
+    state.manageQuery = event.target.value;
+    renderManage();
+  }));
+
+  qs("#manageCategoryFilter").addEventListener("change", (event) => {
+    state.category = event.target.value;
+    renderAll();
+  });
+
+  ["#openDate", "#openTime", "#manualExpireDate", "#manualExpireTime"].forEach((selector) => {
+    qs(selector).addEventListener("input", updatePrintPreview);
+  });
 }
 
-function filterItems() {
-    const query = document.getElementById('searchInput').value.toLowerCase();
-    const filtered = appState.items.filter(item => item.ItemName.toLowerCase().includes(query) || item.Category.toLowerCase().includes(query));
-    renderItemsGrid(filtered);
+async function loadItems({ quiet = false } = {}) {
+  if (!quiet) showLoading(true);
+  setSkeletonVisible(!state.items.length);
+
+  try {
+    const result = await apiGet("getItems");
+    setItems(result.data || []);
+    renderAll();
+    if (!quiet) showToast("โหลดข้อมูลล่าสุดแล้ว", "success");
+  } catch (error) {
+    showToast("โหลดข้อมูลไม่สำเร็จ", "error", error.message);
+    renderAll();
+  } finally {
+    setSkeletonVisible(false);
+    showLoading(false);
+  }
 }
 
-// ==========================================
-// Date, Time & Logic Calculation (Thai Locale)
-// ==========================================
-function setDefaultDateTime() {
-    const now = new Date();
-    // Offset for Thailand Timezone (+7) is handled natively by the browser local time
-    const yyyy = now.getFullYear();
-    const mm = String(now.getMonth() + 1).padStart(2, '0');
-    const dd = String(now.getDate()).padStart(2, '0');
-    const hh = String(now.getHours()).padStart(2, '0');
-    const min = String(now.getMinutes()).padStart(2, '0');
-
-    document.getElementById('openDate').value = `${yyyy}-${mm}-${dd}`;
-    document.getElementById('openTime').value = `${hh}:${min}`;
+function renderAll() {
+  renderCategoryFilters();
+  renderHome();
+  renderManage();
 }
 
-// Convert YYYY-MM-DD to Thai Date (e.g. 10 กรกฎาคม 2569)
-function formatThaiDate(dateString) {
-    if(!dateString) return '-';
-    const date = new Date(dateString);
-    return new Intl.DateTimeFormat('th-TH', { 
-        year: 'numeric', month: 'long', day: 'numeric' 
-    }).format(date);
+function renderHome() {
+  const items = filterItems(state.homeQuery, state.category);
+  renderItemsGrid(items);
 }
 
-function openPrintModal(item) {
-    appState.selectedItem = item;
-    document.getElementById('selectedItemName').innerText = item.ItemName;
-    document.getElementById('selectedItemRule').innerText = `การเก็บรักษา: ${item.StorageMethod} | อายุหลังเปิด: ${item.ShelfLifeValue} ${item.ShelfLifeUnit}`;
-    
-    const manualDiv = document.getElementById('manualExpireDiv');
-    if(item.ShelfLifeUnit === 'ตามสลาก') {
-        manualDiv.classList.remove('hidden');
-    } else {
-        manualDiv.classList.add('hidden');
-    }
-
-    calculatePreview();
-    openModal('printModal');
+function renderManage() {
+  const items = filterItems(state.manageQuery, state.category);
+  renderManageTable(items);
 }
 
-function calculatePreview() {
-    const item = appState.selectedItem;
-    const openDateStr = document.getElementById('openDate').value;
-    const openTimeStr = document.getElementById('openTime').value;
-    
-    let expDate = new Date(`${openDateStr}T${openTimeStr}:00`);
-    let expTimeStr = openTimeStr;
-    let expDateStrThai = '-';
-
-    // Update Label UI: Open Date
-    document.getElementById('lbl-name').innerText = item.ItemName;
-    document.getElementById('lbl-open-date').innerText = formatThaiDate(openDateStr);
-    document.getElementById('lbl-open-time').innerText = `${openTimeStr} น.`;
-    document.getElementById('lbl-details').innerText = `(อายุ ${item.ShelfLifeValue} ${item.ShelfLifeUnit})`;
-
-    // Calculate Expiry
-    if(item.ShelfLifeUnit === 'วัน') {
-        expDate.setDate(expDate.getDate() + parseInt(item.ShelfLifeValue));
-    } else if(item.ShelfLifeUnit === 'เดือน') {
-        expDate.setMonth(expDate.getMonth() + parseInt(item.ShelfLifeValue));
-    } else if(item.ShelfLifeUnit === 'ปี') {
-        expDate.setFullYear(expDate.getFullYear() + parseInt(item.ShelfLifeValue));
-    } else if(item.ShelfLifeUnit === 'ตามสลาก') {
-        const manualDate = document.getElementById('manualExpireDate').value;
-        if(manualDate) expDate = new Date(`${manualDate}T${openTimeStr}:00`);
-    }
-
-    // Format Expiry to UI
-    if(!isNaN(expDate.getTime())) {
-        expDateStrThai = formatThaiDate(expDate.toISOString().split('T')[0]);
-        document.getElementById('lbl-exp-date').innerText = expDateStrThai;
-        document.getElementById('lbl-exp-time').innerText = `${expTimeStr} น.`;
-    }
+function switchTab(tab) {
+  document.querySelectorAll(".nav-tab").forEach((button) => {
+    button.classList.toggle("is-active", button.dataset.tab === tab);
+  });
+  qs("#printView").classList.toggle("is-active", tab === "print");
+  qs("#manageView").classList.toggle("is-active", tab === "manage");
 }
 
-// ==========================================
-// Printing & API Logging
-// ==========================================
-async function executePrint() {
-    // 1. Log to Database via GAS in background
-    const logData = {
-        action: 'logPrint',
-        data: {
-            itemName: appState.selectedItem.ItemName,
-            openDate: document.getElementById('lbl-open-date').innerText,
-            openTime: document.getElementById('lbl-open-time').innerText,
-            expireDate: document.getElementById('lbl-exp-date').innerText,
-            expireTime: document.getElementById('lbl-exp-time').innerText
-        }
-    };
+function renderCategoryFilters() {
+  const categories = ["all", ...getCategories()];
+  qs("#categoryFilters").innerHTML = categories.map((category) => `
+    <button class="segment-btn ${category === state.category ? "is-active" : ""}" type="button" data-category="${escapeHTML(category)}">
+      ${category === "all" ? "ทั้งหมด" : escapeHTML(category)}
+    </button>
+  `).join("");
 
-    fetch(GAS_API_URL, {
-        method: 'POST',
-        body: JSON.stringify(logData),
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' } // bypass CORS preflight
-    }).catch(console.error); // Async log, no wait
+  qs("#manageCategoryFilter").innerHTML = categories.map((category) => `
+    <option value="${escapeHTML(category)}" ${category === state.category ? "selected" : ""}>
+      ${category === "all" ? "ทุกประเภท" : escapeHTML(category)}
+    </option>
+  `).join("");
 
-    // 2. Trigger Browser Print natively
-    window.print();
-    showToast('ส่งคำสั่งพิมพ์เรียบร้อยแล้ว', 'success');
-}
-
-// ==========================================
-// UI Helpers
-// ==========================================
-function openModal(id) { document.getElementById(id).style.display = 'flex'; }
-function closeModal(id) { document.getElementById(id).style.display = 'none'; }
-function showLoading(show) { document.getElementById('loading-overlay').style.display = show ? 'flex' : 'none'; }
-
-function showToast(message, type = 'success') {
-    const container = document.getElementById('toast-container');
-    const toast = document.createElement('div');
-    const bgColor = type === 'success' ? 'bg-green-600' : 'bg-red-600';
-    const icon = type === 'success' ? 'fa-check-circle' : 'fa-exclamation-circle';
-    
-    toast.className = `${bgColor} text-white px-6 py-3 rounded-lg shadow-lg flex items-center gap-3 transform transition-all duration-300 translate-x-full opacity-0`;
-    toast.innerHTML = `<i class="fas ${icon} text-xl"></i><span class="font-medium">${message}</span>`;
-    
-    container.appendChild(toast);
-    
-    // Animate In
-    requestAnimationFrame(() => {
-        toast.classList.remove('translate-x-full', 'opacity-0');
+  document.querySelectorAll("[data-category]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.category = button.dataset.category;
+      renderAll();
     });
-
-    // Remove after 3s
-    setTimeout(() => {
-        toast.classList.add('opacity-0');
-        setTimeout(() => toast.remove(), 300);
-    }, 3000);
+  });
 }
 
-function getIconByCategory(category) {
-    if(category.includes('ยาเย็น')) return 'snowflake';
-    if(category.includes('น้ำยา')) return 'flask';
-    if(category.includes('สารน้ำ')) return 'tint';
-    return 'box';
-}
-// ==========================================
-// Item Management & Form Saving
-// ==========================================
-
-// เรนเดอร์ข้อมูลลงในตารางหน้าจัดการรายการ
-function renderManageTable(items) {
-    const tbody = document.getElementById('manageTableBody');
-    if (!tbody) return;
-    
-    tbody.innerHTML = '';
-    
-    if(items.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="3" class="px-6 py-4 text-center text-slate-500">ยังไม่มีข้อมูลในระบบ</td></tr>`;
-        return;
-    }
-
-    items.forEach(item => {
-        const tr = document.createElement('tr');
-        tr.className = "hover:bg-slate-50 transition-colors";
-        tr.innerHTML = `
-            <td class="px-6 py-4 whitespace-nowrap text-sm font-bold text-slate-800">${item.ItemName}</td>
-            <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-600">
-                <span class="px-2 py-1 bg-slate-100 rounded-full text-xs">${item.Category}</span>
-            </td>
-            <td class="px-6 py-4 whitespace-nowrap text-sm text-secondary font-medium">
-                ${item.ShelfLifeUnit === 'ตามสลาก' ? 'ตามสลาก' : item.ShelfLifeValue + ' ' + item.ShelfLifeUnit}
-            </td>
-        `;
-        tbody.appendChild(tr);
-    });
-}
-
-// ==========================================
-// Image Upload Processing
-// ==========================================
-let currentUploadedImageBase64 = null;
-let currentUploadedImageMime = null;
-
-// ฟังก์ชันย่อขนาดภาพด้วย Canvas เพื่อให้โหลดไว และส่งผ่าน API ได้ไม่เกินโควต้า
-function handleImageUpload(event) {
-    const file = event.target.files[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = function(e) {
-        const img = new Image();
-        img.onload = function() {
-            const canvas = document.createElement('canvas');
-            const MAX_WIDTH = 600; // ย่อขนาดความกว้างสูงสุดไม่เกิน 600px
-            const MAX_HEIGHT = 600;
-            let width = img.width;
-            let height = img.height;
-
-            if (width > height) {
-                if (width > MAX_WIDTH) {
-                    height *= MAX_WIDTH / width;
-                    width = MAX_WIDTH;
-                }
-            } else {
-                if (height > MAX_HEIGHT) {
-                    width *= MAX_HEIGHT / height;
-                    height = MAX_HEIGHT;
-                }
-            }
-
-            canvas.width = width;
-            canvas.height = height;
-            const ctx = canvas.getContext('2d');
-            ctx.drawImage(img, 0, 0, width, height);
-
-            // บันทึกภาพลงตัวแปร
-            currentUploadedImageBase64 = canvas.toDataURL(file.type);
-            currentUploadedImageMime = file.type;
-
-            // แสดงตัวอย่างรูปภาพใน Modal
-            const preview = document.getElementById('imagePreview');
-            const placeholder = document.getElementById('imageUploadPlaceholder');
-            preview.src = currentUploadedImageBase64;
-            preview.classList.remove('hidden');
-            placeholder.classList.add('hidden');
-        }
-        img.src = e.target.result;
-    }
-    reader.readAsDataURL(file);
-}
-
-// ==========================================
-// Card Rendering (ดีไซน์รูปภาพให้เด่น)
-// ==========================================
 function renderItemsGrid(items) {
-    const grid = document.getElementById('itemsGrid');
-    grid.innerHTML = '';
-    
-    if(items.length === 0) {
-        grid.innerHTML = `<div class="col-span-full text-center text-slate-500 py-10 font-medium">ไม่พบรายการข้อมูลที่ค้นหา</div>`;
-        return;
-    }
+  const grid = qs("#itemsGrid");
+  grid.innerHTML = "";
+  qs("#itemsEmpty").classList.toggle("is-hidden", items.length > 0);
 
-    items.forEach(item => {
-        const card = document.createElement('div');
-        // ใช้ Flex คอลัมน์ สร้างรูปภาพให้เต็มความกว้างด้านบน
-        card.className = "bg-white rounded-xl border border-slate-200 hover:shadow-xl hover:border-secondary transition-all cursor-pointer flex flex-col h-full overflow-hidden group";
-        card.onclick = () => openPrintModal(item);
-        
-        // ถ้ารายการไหนไม่มีรูป ให้ใช้รูป Placeholder กลางๆ
-        const imgPlaceholder = `https://placehold.co/600x400/f8fafc/94a3b8?text=${encodeURIComponent(item.Category)}`;
-        const imgSrc = item.ImageURL ? item.ImageURL : imgPlaceholder;
-
-        card.innerHTML = `
-            <div class="h-48 w-full relative bg-slate-100 overflow-hidden border-b border-slate-100">
-                <img src="${imgSrc}" alt="${item.ItemName}" 
-                     class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" 
-                     onerror="this.src='${imgPlaceholder}'">
-                
-                <div class="absolute top-3 right-3 text-xs px-3 py-1 bg-white/95 backdrop-blur-sm text-primary font-bold rounded-full shadow-sm">
-                    ${item.Category}
-                </div>
-            </div>
-            
-            <div class="p-5 flex flex-col flex-grow bg-white">
-                <h3 class="font-bold text-lg text-slate-800 line-clamp-1 mb-2">${item.ItemName}</h3>
-                
-                <p class="text-sm text-slate-500 mb-4 flex items-center gap-2">
-                    <i class="fas fa-temperature-half text-slate-400"></i>
-                    <span class="line-clamp-1">${item.StorageMethod || 'ไม่ระบุการเก็บรักษา'}</span>
-                </p>
-                
-                <div class="mt-auto bg-blue-50/50 text-blue-700 p-3 rounded-lg border border-blue-100 flex justify-between items-center">
-                    <span class="text-sm font-medium"><i class="fas fa-stopwatch mr-1"></i> อายุหลังเปิด:</span>
-                    <span class="font-bold text-sm bg-white px-2 py-1 rounded shadow-sm">
-                        ${item.ShelfLifeUnit === 'ตามสลาก' ? 'กำหนดเอง' : item.ShelfLifeValue + ' ' + item.ShelfLifeUnit}
-                    </span>
-                </div>
-            </div>
-        `;
-        grid.appendChild(card);
+  items.forEach((item) => {
+    const image = item.imageURL || DEFAULT_ICON;
+    const card = document.createElement("article");
+    card.className = "item-card";
+    card.tabIndex = 0;
+    card.innerHTML = `
+      <div class="item-image">
+        <img src="${escapeHTML(image)}" alt="${escapeHTML(item.itemName)}" loading="lazy" onerror="this.src='${DEFAULT_ICON}'">
+      </div>
+      <div class="item-body">
+        <div class="item-meta">
+          <span class="pill">${escapeHTML(item.category)}</span>
+          <span class="pill">${escapeHTML(formatShelfLife(item))}</span>
+        </div>
+        <h3>${escapeHTML(item.itemName)}</h3>
+        <p>${escapeHTML(item.storageMethod || "ไม่ระบุวิธีเก็บรักษา")}</p>
+        <p class="item-detail">${escapeHTML(item.details || "ไม่มีรายละเอียดเพิ่มเติม")}</p>
+        <div class="item-footer"><span>เลือกพิมพ์</span><span>→</span></div>
+      </div>
+    `;
+    card.addEventListener("click", () => openPrintWorkflow(item));
+    card.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        openPrintWorkflow(item);
+      }
     });
+    grid.appendChild(card);
+  });
 }
 
-// ==========================================
-// อัปเดตฟังก์ชันบันทึกข้อมูล ให้ส่ง Base64 รูปภาพไปด้วย
-// ==========================================
-async function saveNewItem() {
-    const itemName = document.getElementById('newItemName').value;
-    const category = document.getElementById('newItemCategory').value;
-    const shelfLifeValue = document.getElementById('newItemLifeValue').value || '-';
-    const shelfLifeUnit = document.getElementById('newItemLifeUnit').value;
-    const storageMethod = document.getElementById('newItemStorage').value || '-';
+function renderManageTable(items) {
+  const tbody = qs("#manageTableBody");
+  tbody.innerHTML = "";
+  qs("#manageEmpty").classList.toggle("is-hidden", items.length > 0);
 
-    if(!itemName) {
-        showToast('กรุณากรอกชื่อรายการด้วยครับ', 'error');
-        return;
-    }
-    
-    if(shelfLifeUnit !== 'ตามสลาก' && (shelfLifeValue === '-' || shelfLifeValue <= 0)) {
-        showToast('กรุณาระบุอายุหลังเปิดใช้งานให้ถูกต้อง', 'error');
-        return;
-    }
+  items.forEach((item) => {
+    const row = document.createElement("tr");
+    row.innerHTML = `
+      <td>
+        <div class="table-item">
+          <img src="${escapeHTML(item.imageURL || DEFAULT_ICON)}" alt="${escapeHTML(item.itemName)}" loading="lazy" onerror="this.src='${DEFAULT_ICON}'">
+          <div>
+            <strong>${escapeHTML(item.itemName)}</strong>
+            <span>${escapeHTML(item.details || "ไม่มีรายละเอียดเพิ่มเติม")}</span>
+          </div>
+        </div>
+      </td>
+      <td><span class="pill">${escapeHTML(item.category)}</span></td>
+      <td>${escapeHTML(formatShelfLife(item))}</td>
+      <td>${escapeHTML(item.storageMethod || "-")}</td>
+      <td class="align-right">
+        <div class="table-actions">
+          <button class="btn btn-ghost compact" type="button" data-edit>แก้ไข</button>
+          <button class="btn btn-danger compact" type="button" data-delete>ลบ</button>
+        </div>
+      </td>
+    `;
+    row.querySelector("[data-edit]").addEventListener("click", () => openEditItemModal(item));
+    row.querySelector("[data-delete]").addEventListener("click", () => openDeleteConfirm(item));
+    tbody.appendChild(row);
+  });
+}
 
-    closeModal('addItemModal');
+function renderSkeleton() {
+  qs("#itemsSkeleton").innerHTML = Array.from({ length: 6 }).map(() => `
+    <article class="item-card skeleton-card">
+      <div class="skeleton image"></div>
+      <div class="skeleton line wide"></div>
+      <div class="skeleton line"></div>
+      <div class="skeleton line short"></div>
+    </article>
+  `).join("");
+}
+
+function setSkeletonVisible(visible) {
+  qs("#itemsSkeleton").classList.toggle("is-hidden", !visible);
+}
+
+function openPrintWorkflow(item) {
+  state.selectedItem = item;
+  qs("#selectedItemImage").src = item.imageURL || DEFAULT_ICON;
+  qs("#selectedItemName").textContent = item.itemName;
+  qs("#selectedItemMeta").textContent = `${item.category} · ${formatShelfLife(item)}`;
+
+  const manual = item.shelfLifeUnit === "label";
+  qs("#manualExpiryFields").classList.toggle("is-hidden", !manual);
+  qs("#manualExpireDate").required = manual;
+  qs("#manualExpireTime").value = qs("#openTime").value;
+
+  updatePrintPreview();
+  openModal("printModal");
+}
+
+function updatePrintPreview() {
+  const item = state.selectedItem;
+  if (!item) return;
+
+  syncThaiDateHelpers();
+  const openDateValue = qs("#openDate").value;
+  const openTimeValue = qs("#openTime").value;
+  const expiry = calculateExpiry(
+    item,
+    openDateValue,
+    openTimeValue,
+    qs("#manualExpireDate").value,
+    qs("#manualExpireTime").value || openTimeValue
+  );
+
+  const openDate = parseLocalDateTime(openDateValue, openTimeValue);
+  qs("#expirySummary").textContent = expiry ? formatThaiDateTime(expiry) : "กรุณาระบุข้อมูลให้ครบ";
+  qs("#labelCategory").textContent = item.category;
+  qs("#labelItemName").textContent = item.itemName;
+  qs("#labelOpenDate").textContent = formatDateForLabel(openDate);
+  qs("#labelOpenTime").textContent = formatThaiTime(openTimeValue);
+  qs("#labelExpireDate").textContent = expiry ? formatDateForLabel(expiry) : "-";
+  qs("#labelExpireTime").textContent = expiry ? formatTimeForLabel(expiry) : "-";
+  qs("#labelShelfLife").textContent = formatShelfLifeForLabel(item);
+  qs("#labelDetails").textContent = item.details || item.storageMethod || "";
+}
+
+function setDefaultDateTime() {
+  const now = new Date();
+  qs("#openDate").value = toDateInputValue(now);
+  qs("#openTime").value = toTimeInputValue(now);
+  qs("#manualExpireTime").value = toTimeInputValue(now);
+  syncThaiDateHelpers();
+}
+
+function syncThaiDateHelpers() {
+  qs("#openDateThai").textContent = formatThaiDate(qs("#openDate").value);
+  qs("#openTimeThai").textContent = formatThaiTime(qs("#openTime").value);
+  qs("#manualExpireDateThai").textContent = formatThaiDate(qs("#manualExpireDate").value);
+}
+
+async function executePrint() {
+  const item = state.selectedItem;
+  if (!item || qs("#labelExpireDate").textContent === "-") {
+    showToast("ยังพิมพ์ไม่ได้", "warning", "กรุณาระบุข้อมูลให้ครบ");
+    return;
+  }
+
+  apiPost("logPrint", {
+    itemId: item.id,
+    itemName: item.itemName,
+    openDate: qs("#labelOpenDate").textContent,
+    openTime: qs("#labelOpenTime").textContent,
+    expireDate: qs("#labelExpireDate").textContent,
+    expireTime: qs("#labelExpireTime").textContent,
+    shelfLifeText: formatShelfLife(item),
+    details: item.details || "",
+    clientInfo: navigator.userAgent
+  }).catch((error) => showToast("บันทึกประวัติพิมพ์ไม่สำเร็จ", "warning", error.message));
+
+  window.print();
+  showToast("ส่งคำสั่งพิมพ์แล้ว", "success");
+}
+
+function openCreateItemModal() {
+  state.imageData = "";
+  qs("#itemModalTitle").textContent = "เพิ่มรายการ";
+  qs("#itemForm").reset();
+  qs("#itemId").value = "";
+  qs("#itemCategory").value = "น้ำยา";
+  qs("#customCategory").value = "";
+  qs("#shelfLifeUnit").value = "day";
+  qs("#itemImagePreview").src = "";
+  qs("#itemImagePreview").classList.add("is-hidden");
+  qs("#imageDropHint").classList.remove("is-hidden");
+  syncShelfLifeInput();
+  syncCustomCategoryInput();
+  openModal("itemModal");
+}
+
+function openEditItemModal(item) {
+  state.imageData = item.imageURL || "";
+  qs("#itemModalTitle").textContent = "แก้ไขรายการ";
+  qs("#itemId").value = item.id;
+  qs("#itemName").value = item.itemName;
+  if (DEFAULT_CATEGORIES.includes(item.category) && item.category !== "อื่นๆ ระบุ") {
+    qs("#itemCategory").value = item.category;
+    qs("#customCategory").value = "";
+  } else {
+    qs("#itemCategory").value = "other";
+    qs("#customCategory").value = item.category === "อื่นๆ ระบุ" ? "" : item.category;
+  }
+  qs("#shelfLifeValue").value = item.shelfLifeUnit === "label" ? "" : item.shelfLifeValue;
+  qs("#shelfLifeUnit").value = item.shelfLifeUnit;
+  qs("#storageMethod").value = item.storageMethod;
+  qs("#itemDetails").value = item.details;
+
+  if (item.imageURL) {
+    qs("#itemImagePreview").src = item.imageURL;
+    qs("#itemImagePreview").classList.remove("is-hidden");
+    qs("#imageDropHint").classList.add("is-hidden");
+  } else {
+    qs("#itemImagePreview").src = "";
+    qs("#itemImagePreview").classList.add("is-hidden");
+    qs("#imageDropHint").classList.remove("is-hidden");
+  }
+
+  syncShelfLifeInput();
+  syncCustomCategoryInput();
+  openModal("itemModal");
+}
+
+function syncCustomCategoryInput() {
+  const isOther = qs("#itemCategory").value === "other";
+  qs("#customCategoryField").classList.toggle("is-hidden", !isOther);
+  qs("#customCategory").required = isOther;
+  if (!isOther) qs("#customCategory").value = "";
+}
+
+function syncShelfLifeInput() {
+  const isLabel = qs("#shelfLifeUnit").value === "label";
+  qs("#shelfLifeValue").disabled = isLabel;
+  qs("#shelfLifeValue").required = !isLabel;
+  if (isLabel) qs("#shelfLifeValue").value = "";
+}
+
+async function handleImageChange(event) {
+  const file = event.target.files && event.target.files[0];
+  if (!file) return;
+
+  try {
     showLoading(true);
+    state.imageData = await fileToCompressedDataUrl(file);
+    qs("#itemImagePreview").src = state.imageData;
+    qs("#itemImagePreview").classList.remove("is-hidden");
+    qs("#imageDropHint").classList.add("is-hidden");
+    showToast("เตรียมรูปภาพเรียบร้อย", "success");
+  } catch (error) {
+    showToast("อัปโหลดรูปไม่สำเร็จ", "error", error.message);
+    clearImage();
+  } finally {
+    showLoading(false);
+  }
+}
 
-    const payload = {
-        action: 'addItem',
-        data: {
-            itemName: itemName,
-            category: category,
-            imageURL: '', // จะให้ GAS จัดการสร้าง URL ให้แทน
-            imageBase64: currentUploadedImageBase64,
-            mimeType: currentUploadedImageMime,
-            storageMethod: storageMethod,
-            shelfLifeUnit: shelfLifeUnit,
-            shelfLifeValue: shelfLifeValue,
-            details: ''
-        }
-    };
+function clearImage() {
+  state.imageData = "";
+  qs("#itemImage").value = "";
+  qs("#itemImagePreview").src = "";
+  qs("#itemImagePreview").classList.add("is-hidden");
+  qs("#imageDropHint").classList.remove("is-hidden");
+}
 
-    try {
-        const response = await fetch(GAS_API_URL, {
-            method: 'POST',
-            body: JSON.stringify(payload),
-            headers: { 'Content-Type': 'text/plain;charset=utf-8' }
-        });
-        
-        const result = await response.json();
-        if(result.status === 'success') {
-            showToast('บันทึกรายการและอัพโหลดรูปภาพสำเร็จ', 'success');
-            
-            // รีเซ็ตฟอร์มทั้งหมดรวมถึงรูปภาพ
-            document.getElementById('newItemName').value = '';
-            document.getElementById('newItemLifeValue').value = '';
-            document.getElementById('newItemStorage').value = '';
-            document.getElementById('newItemImage').value = '';
-            
-            document.getElementById('imagePreview').classList.add('hidden');
-            document.getElementById('imageUploadPlaceholder').classList.remove('hidden');
-            document.getElementById('imagePreview').src = '';
-            currentUploadedImageBase64 = null;
-            currentUploadedImageMime = null;
-            
-            fetchItems(); // รีโหลดหน้าจอใหม่
-        } else {
-            showToast('ไม่สามารถบันทึกได้: ' + result.message, 'error');
-        }
-    } catch (error) {
-        showToast('เกิดข้อผิดพลาดในการเชื่อมต่อกับเซิร์ฟเวอร์', 'error');
-    } finally {
-        showLoading(false);
+async function saveItem(event) {
+  event.preventDefault();
+  const isLabel = qs("#shelfLifeUnit").value === "label";
+  const category = qs("#itemCategory").value === "other"
+    ? qs("#customCategory").value.trim()
+    : qs("#itemCategory").value;
+  const payload = {
+    id: qs("#itemId").value,
+    itemName: qs("#itemName").value.trim(),
+    category,
+    imageURL: state.imageData,
+    details: qs("#itemDetails").value.trim(),
+    storageMethod: qs("#storageMethod").value.trim(),
+    shelfLifeValue: isLabel ? "" : Number(qs("#shelfLifeValue").value),
+    shelfLifeUnit: qs("#shelfLifeUnit").value
+  };
+
+  if (!payload.itemName) return showToast("กรุณากรอกชื่อรายการ", "warning");
+  if (!payload.category) return showToast("กรุณาระบุประเภท", "warning");
+  if (!isLabel && (!payload.shelfLifeValue || payload.shelfLifeValue < 1)) {
+    return showToast("กรุณาระบุอายุหลังเปิด", "warning");
+  }
+
+  showLoading(true);
+  try {
+    await apiPost(payload.id ? "updateItem" : "addItem", payload);
+    closeModal("itemModal");
+    showToast(payload.id ? "แก้ไขรายการแล้ว" : "เพิ่มรายการแล้ว", "success");
+    await loadItems({ quiet: true });
+  } catch (error) {
+    showToast("บันทึกไม่สำเร็จ", "error", error.message);
+  } finally {
+    showLoading(false);
+  }
+}
+
+function openDeleteConfirm(item) {
+  state.pendingDeleteId = item.id;
+  qs("#confirmMessage").textContent = `ต้องการลบ “${item.itemName}” หรือไม่?`;
+  openModal("confirmModal");
+}
+
+async function deleteSelectedItem() {
+  if (!state.pendingDeleteId) return;
+  showLoading(true);
+  try {
+    await apiPost("deleteItem", { id: state.pendingDeleteId });
+    state.pendingDeleteId = "";
+    closeModal("confirmModal");
+    showToast("ลบรายการแล้ว", "success");
+    await loadItems({ quiet: true });
+  } catch (error) {
+    showToast("ลบไม่สำเร็จ", "error", error.message);
+  } finally {
+    showLoading(false);
+  }
+}
+
+function setItems(items) {
+  state.items = Array.isArray(items) ? items.map(normalizeItem) : [];
+  sessionStorage.setItem(CACHE_KEY, JSON.stringify({ savedAt: Date.now(), items: state.items }));
+}
+
+function getCachedItems() {
+  try {
+    const cached = JSON.parse(sessionStorage.getItem(CACHE_KEY) || "null");
+    if (!cached || Date.now() - cached.savedAt > CACHE_TTL_MS) return [];
+    return cached.items.map(normalizeItem);
+  } catch {
+    return [];
+  }
+}
+
+function normalizeItem(raw) {
+  return {
+    id: String(raw.id || raw.Id || raw.ID || ""),
+    itemName: String(raw.itemName || raw.ItemName || ""),
+    category: String(raw.category || raw.Category || "อื่นๆ ระบุ"),
+    imageURL: String(raw.imageURL || raw.ImageURL || raw.imageUrl || raw.ImageUrl || ""),
+    details: String(raw.details || raw.Details || ""),
+    storageMethod: String(raw.storageMethod || raw.StorageMethod || ""),
+    shelfLifeValue: raw.shelfLifeValue || raw.ShelfLifeValue || "",
+    shelfLifeUnit: normalizeUnit(raw.shelfLifeUnit || raw.ShelfLifeUnit)
+  };
+}
+
+function normalizeUnit(unit) {
+  const map = {
+    "วัน": "day",
+    day: "day",
+    days: "day",
+    "เดือน": "month",
+    month: "month",
+    months: "month",
+    "ปี": "year",
+    year: "year",
+    years: "year",
+    "ตามสลาก": "label",
+    "หมดอายุตามสลากข้างขวด": "label",
+    label: "label"
+  };
+  return map[String(unit || "day").trim()] || String(unit || "day").trim();
+}
+
+function filterItems(query, category) {
+  const keyword = query.trim().toLowerCase();
+  return state.items.filter((item) => {
+    const matchCategory = category === "all" || item.category === category;
+    const text = [item.itemName, item.category, item.details, item.storageMethod].join(" ").toLowerCase();
+    return matchCategory && (!keyword || text.includes(keyword));
+  });
+}
+
+function getCategories() {
+  return [...new Set([...DEFAULT_CATEGORIES, ...state.items.map((item) => item.category).filter(Boolean)])];
+}
+
+async function apiGet(action, params = {}) {
+  const url = new URL(GAS_API_URL);
+  url.searchParams.set("action", action);
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== "") url.searchParams.set(key, value);
+  });
+  return parseApiResponse(await fetch(url.toString(), { method: "GET" }));
+}
+
+async function apiPost(action, data = {}) {
+  return parseApiResponse(await fetch(GAS_API_URL, {
+    method: "POST",
+    body: JSON.stringify({ action, data }),
+    headers: { "Content-Type": "text/plain;charset=utf-8" }
+  }));
+}
+
+async function parseApiResponse(response) {
+  const payload = await response.json();
+  if (!response.ok || payload.status === "error") throw new Error(payload.message || "API error");
+  return payload;
+}
+
+function openModal(id) {
+  const modal = qs(`#${id}`);
+  modal.classList.add("is-open");
+  modal.setAttribute("aria-hidden", "false");
+  document.body.style.overflow = "hidden";
+}
+
+function closeModal(id) {
+  const modal = qs(`#${id}`);
+  modal.classList.remove("is-open");
+  modal.setAttribute("aria-hidden", "true");
+  if (!document.querySelector(".modal.is-open")) document.body.style.overflow = "";
+}
+
+function bindModalDismiss() {
+  document.addEventListener("click", (event) => {
+    if (event.target.closest("[data-close-modal]")) {
+      const modal = event.target.closest(".modal");
+      if (modal) closeModal(modal.id);
     }
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") document.querySelectorAll(".modal.is-open").forEach((modal) => closeModal(modal.id));
+  });
+}
+
+function fileToCompressedDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("อ่านไฟล์รูปไม่ได้"));
+    reader.onload = () => {
+      const image = new Image();
+      image.onerror = () => reject(new Error("ไฟล์รูปไม่ถูกต้อง"));
+      image.onload = () => {
+        let maxSize = 760;
+        let quality = 0.78;
+        let dataUrl = "";
+
+        for (let attempt = 0; attempt < 10; attempt += 1) {
+          dataUrl = renderImage(image, maxSize, quality);
+          if (dataUrl.length <= 45000) return resolve(dataUrl);
+          if (quality > 0.46) quality -= 0.08;
+          else maxSize = Math.max(280, Math.floor(maxSize * 0.82));
+        }
+        reject(new Error("รูปภาพใหญ่เกินไป กรุณาเลือกรูปที่เล็กลง"));
+      };
+      image.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function renderImage(image, maxSize, quality) {
+  const scale = Math.min(1, maxSize / Math.max(image.width, image.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(image.width * scale));
+  canvas.height = Math.max(1, Math.round(image.height * scale));
+  const context = canvas.getContext("2d");
+  context.fillStyle = "#fff";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.drawImage(image, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL("image/jpeg", quality);
+}
+
+function toDateInputValue(date) {
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
+}
+
+function toTimeInputValue(date) {
+  return `${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+}
+
+function parseLocalDateTime(dateValue, timeValue = "00:00") {
+  if (!dateValue) return null;
+  const [year, month, day] = dateValue.split("-").map(Number);
+  const [hour = 0, minute = 0] = (timeValue || "00:00").split(":").map(Number);
+  return new Date(year, month - 1, day, hour, minute);
+}
+
+function calculateExpiry(item, openDateValue, openTimeValue, manualDateValue, manualTimeValue) {
+  const openDate = parseLocalDateTime(openDateValue, openTimeValue);
+  if (!openDate) return null;
+  if (item.shelfLifeUnit === "label") return parseLocalDateTime(manualDateValue, manualTimeValue || openTimeValue);
+
+  const expiryDate = new Date(openDate.getTime());
+  const value = Number(item.shelfLifeValue || 0);
+  if (!value) return null;
+  if (item.shelfLifeUnit === "day") expiryDate.setDate(expiryDate.getDate() + value);
+  if (item.shelfLifeUnit === "month") expiryDate.setMonth(expiryDate.getMonth() + value);
+  if (item.shelfLifeUnit === "year") expiryDate.setFullYear(expiryDate.getFullYear() + value);
+  return expiryDate;
+}
+
+function formatThaiDate(dateOrValue) {
+  if (!dateOrValue) return "-";
+  const date = typeof dateOrValue === "string" ? parseLocalDateTime(dateOrValue) : dateOrValue;
+  if (!date || Number.isNaN(date.getTime())) return "-";
+  return new Intl.DateTimeFormat("th-TH-u-ca-buddhist", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    timeZone: "Asia/Bangkok"
+  }).format(date);
+}
+
+function formatThaiTime(timeValue) {
+  return timeValue ? `${timeValue.slice(0, 5)} น.` : "-";
+}
+
+function formatThaiDateTime(date) {
+  return date && !Number.isNaN(date.getTime()) ? `${formatThaiDate(date)} เวลา ${pad2(date.getHours())}:${pad2(date.getMinutes())} น.` : "-";
+}
+
+function formatDateForLabel(date) {
+  if (!date || Number.isNaN(date.getTime())) return "-";
+  const shortThaiMonths = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
+  return `${date.getDate()} ${shortThaiMonths[date.getMonth()]} ${date.getFullYear() + 543}`;
+}
+
+function formatTimeForLabel(date) {
+  return date && !Number.isNaN(date.getTime()) ? `${pad2(date.getHours())}:${pad2(date.getMinutes())} น.` : "-";
+}
+
+function formatShelfLife(item) {
+  if (item.shelfLifeUnit === "label") return "ตามสลาก";
+  const unitText = { day: "วัน", month: "เดือน", year: "ปี" }[item.shelfLifeUnit] || "";
+  return item.shelfLifeValue ? `${item.shelfLifeValue} ${unitText}` : "-";
+}
+
+function formatShelfLifeForLabel(item) {
+  if (item.shelfLifeUnit === "label") return "หมดอายุตามสลากข้างขวด";
+  const shelfLife = formatShelfLife(item);
+  return shelfLife === "-" ? "-" : `กำหนดอายุ ${shelfLife} หลังเปิดใช้งาน`;
+}
+
+function qs(selector) {
+  return document.querySelector(selector);
+}
+
+function showLoading(show) {
+  qs("#loadingOverlay").classList.toggle("is-hidden", !show);
+}
+
+function showToast(message, type = "success", detail = "") {
+  const toast = document.createElement("div");
+  toast.className = `toast ${type}`;
+  toast.innerHTML = `<div>${type === "success" ? "✓" : type === "warning" ? "!" : "×"}</div><div><strong>${escapeHTML(message)}</strong>${detail ? `<span>${escapeHTML(detail)}</span>` : ""}</div>`;
+  qs("#toastRegion").appendChild(toast);
+  setTimeout(() => {
+    toast.style.opacity = "0";
+    setTimeout(() => toast.remove(), 220);
+  }, 3300);
+}
+
+function debounce(callback, wait = 180) {
+  let timeoutId;
+  return (...args) => {
+    clearTimeout(timeoutId);
+    timeoutId = setTimeout(() => callback(...args), wait);
+  };
+}
+
+function escapeHTML(value = "") {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function pad2(value) {
+  return String(value).padStart(2, "0");
 }
