@@ -40,37 +40,6 @@ function switchTab(tabId) {
     document.getElementById('tab-manage').style.display = tabId === 'manage' ? 'block' : 'none';
 }
 
-function renderItemsGrid(items) {
-    const grid = document.getElementById('itemsGrid');
-    grid.innerHTML = '';
-    
-    if(items.length === 0) {
-        grid.innerHTML = `<div class="col-span-full text-center text-slate-500 py-10">ไม่พบรายการข้อมูล</div>`;
-        return;
-    }
-
-    items.forEach(item => {
-        const card = document.createElement('div');
-        card.className = "bg-white p-5 rounded-xl border border-slate-200 hover:shadow-lg hover:border-secondary transition-all cursor-pointer flex flex-col h-full";
-        card.onclick = () => openPrintModal(item);
-        card.innerHTML = `
-            <div class="flex items-center gap-4 mb-3">
-                <div class="w-12 h-12 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-xl font-bold shrink-0">
-                    <i class="fas fa-${getIconByCategory(item.Category)}"></i>
-                </div>
-                <div>
-                    <h3 class="font-bold text-slate-800 line-clamp-1">${item.ItemName}</h3>
-                    <span class="text-xs px-2 py-1 bg-slate-100 text-slate-600 rounded-full">${item.Category}</span>
-                </div>
-            </div>
-            <div class="text-sm text-slate-600 mt-auto pt-3 border-t border-slate-100">
-                <i class="fas fa-clock text-slate-400 mr-1"></i> อายุ: <span class="font-semibold text-primary">${item.ShelfLifeValue} ${item.ShelfLifeUnit}</span>
-            </div>
-        `;
-        grid.appendChild(card);
-    });
-}
-
 function filterItems() {
     const query = document.getElementById('searchInput').value.toLowerCase();
     const filtered = appState.items.filter(item => item.ItemName.toLowerCase().includes(query) || item.Category.toLowerCase().includes(query));
@@ -248,7 +217,116 @@ function renderManageTable(items) {
     });
 }
 
-// ฟังก์ชันบันทึกข้อมูลรายการใหม่ไปยัง Google Sheets
+// ==========================================
+// Image Upload Processing
+// ==========================================
+let currentUploadedImageBase64 = null;
+let currentUploadedImageMime = null;
+
+// ฟังก์ชันย่อขนาดภาพด้วย Canvas เพื่อให้โหลดไว และส่งผ่าน API ได้ไม่เกินโควต้า
+function handleImageUpload(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        const img = new Image();
+        img.onload = function() {
+            const canvas = document.createElement('canvas');
+            const MAX_WIDTH = 600; // ย่อขนาดความกว้างสูงสุดไม่เกิน 600px
+            const MAX_HEIGHT = 600;
+            let width = img.width;
+            let height = img.height;
+
+            if (width > height) {
+                if (width > MAX_WIDTH) {
+                    height *= MAX_WIDTH / width;
+                    width = MAX_WIDTH;
+                }
+            } else {
+                if (height > MAX_HEIGHT) {
+                    width *= MAX_HEIGHT / height;
+                    height = MAX_HEIGHT;
+                }
+            }
+
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0, width, height);
+
+            // บันทึกภาพลงตัวแปร
+            currentUploadedImageBase64 = canvas.toDataURL(file.type);
+            currentUploadedImageMime = file.type;
+
+            // แสดงตัวอย่างรูปภาพใน Modal
+            const preview = document.getElementById('imagePreview');
+            const placeholder = document.getElementById('imageUploadPlaceholder');
+            preview.src = currentUploadedImageBase64;
+            preview.classList.remove('hidden');
+            placeholder.classList.add('hidden');
+        }
+        img.src = e.target.result;
+    }
+    reader.readAsDataURL(file);
+}
+
+// ==========================================
+// Card Rendering (ดีไซน์รูปภาพให้เด่น)
+// ==========================================
+function renderItemsGrid(items) {
+    const grid = document.getElementById('itemsGrid');
+    grid.innerHTML = '';
+    
+    if(items.length === 0) {
+        grid.innerHTML = `<div class="col-span-full text-center text-slate-500 py-10 font-medium">ไม่พบรายการข้อมูลที่ค้นหา</div>`;
+        return;
+    }
+
+    items.forEach(item => {
+        const card = document.createElement('div');
+        // ใช้ Flex คอลัมน์ สร้างรูปภาพให้เต็มความกว้างด้านบน
+        card.className = "bg-white rounded-xl border border-slate-200 hover:shadow-xl hover:border-secondary transition-all cursor-pointer flex flex-col h-full overflow-hidden group";
+        card.onclick = () => openPrintModal(item);
+        
+        // ถ้ารายการไหนไม่มีรูป ให้ใช้รูป Placeholder กลางๆ
+        const imgPlaceholder = `https://placehold.co/600x400/f8fafc/94a3b8?text=${encodeURIComponent(item.Category)}`;
+        const imgSrc = item.ImageURL ? item.ImageURL : imgPlaceholder;
+
+        card.innerHTML = `
+            <div class="h-48 w-full relative bg-slate-100 overflow-hidden border-b border-slate-100">
+                <img src="${imgSrc}" alt="${item.ItemName}" 
+                     class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" 
+                     onerror="this.src='${imgPlaceholder}'">
+                
+                <div class="absolute top-3 right-3 text-xs px-3 py-1 bg-white/95 backdrop-blur-sm text-primary font-bold rounded-full shadow-sm">
+                    ${item.Category}
+                </div>
+            </div>
+            
+            <div class="p-5 flex flex-col flex-grow bg-white">
+                <h3 class="font-bold text-lg text-slate-800 line-clamp-1 mb-2">${item.ItemName}</h3>
+                
+                <p class="text-sm text-slate-500 mb-4 flex items-center gap-2">
+                    <i class="fas fa-temperature-half text-slate-400"></i>
+                    <span class="line-clamp-1">${item.StorageMethod || 'ไม่ระบุการเก็บรักษา'}</span>
+                </p>
+                
+                <div class="mt-auto bg-blue-50/50 text-blue-700 p-3 rounded-lg border border-blue-100 flex justify-between items-center">
+                    <span class="text-sm font-medium"><i class="fas fa-stopwatch mr-1"></i> อายุหลังเปิด:</span>
+                    <span class="font-bold text-sm bg-white px-2 py-1 rounded shadow-sm">
+                        ${item.ShelfLifeUnit === 'ตามสลาก' ? 'กำหนดเอง' : item.ShelfLifeValue + ' ' + item.ShelfLifeUnit}
+                    </span>
+                </div>
+            </div>
+        `;
+        grid.appendChild(card);
+    });
+}
+
+// ==========================================
+// อัปเดตฟังก์ชันบันทึกข้อมูล ให้ส่ง Base64 รูปภาพไปด้วย
+// ==========================================
 async function saveNewItem() {
     const itemName = document.getElementById('newItemName').value;
     const category = document.getElementById('newItemCategory').value;
@@ -274,7 +352,9 @@ async function saveNewItem() {
         data: {
             itemName: itemName,
             category: category,
-            imageURL: '',
+            imageURL: '', // จะให้ GAS จัดการสร้าง URL ให้แทน
+            imageBase64: currentUploadedImageBase64,
+            mimeType: currentUploadedImageMime,
             storageMethod: storageMethod,
             shelfLifeUnit: shelfLifeUnit,
             shelfLifeValue: shelfLifeValue,
@@ -291,13 +371,21 @@ async function saveNewItem() {
         
         const result = await response.json();
         if(result.status === 'success') {
-            showToast('บันทึกรายการใหม่สำเร็จ', 'success');
-            // รีเซ็ตฟอร์ม
+            showToast('บันทึกรายการและอัพโหลดรูปภาพสำเร็จ', 'success');
+            
+            // รีเซ็ตฟอร์มทั้งหมดรวมถึงรูปภาพ
             document.getElementById('newItemName').value = '';
             document.getElementById('newItemLifeValue').value = '';
             document.getElementById('newItemStorage').value = '';
-            // โหลดข้อมูลใหม่จาก Sheets
-            fetchItems(); 
+            document.getElementById('newItemImage').value = '';
+            
+            document.getElementById('imagePreview').classList.add('hidden');
+            document.getElementById('imageUploadPlaceholder').classList.remove('hidden');
+            document.getElementById('imagePreview').src = '';
+            currentUploadedImageBase64 = null;
+            currentUploadedImageMime = null;
+            
+            fetchItems(); // รีโหลดหน้าจอใหม่
         } else {
             showToast('ไม่สามารถบันทึกได้: ' + result.message, 'error');
         }
