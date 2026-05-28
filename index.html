@@ -1,227 +1,295 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="th">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ระบบพิมพ์สติ๊กเกอร์วันหมดอายุ | Smart Hospital</title>
-    
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🏥</text></svg>">
-    
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="styles.css">
-    
-    <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    fontFamily: {
-                        // ตั้งค่าให้ทั้งระบบใช้ฟอนต์ IBM Plex Sans Thai
-                        sans: ['"IBM Plex Sans Thai"', 'sans-serif'],
-                    },
-                    colors: { primary: '#1e3a8a', secondary: '#2563eb', light: '#f8fafc' }
-                }
-            }
-        }
-    </script>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0f2f57">
+  <title>ระบบพิมพ์สติ๊กเกอร์วันหมดอายุ</title>
+  <link rel="icon" href="icon.png" type="image/png">
+  <link rel="apple-touch-icon" href="icon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
 </head>
-<body class="bg-slate-50 font-sans text-slate-800 antialiased flex flex-col min-h-screen">
-
-    <div id="toast-container" class="fixed top-5 right-5 z-50 flex flex-col gap-2"></div>
-
-    <div id="loading-overlay" class="fixed inset-0 bg-slate-900 bg-opacity-50 z-50 flex flex-col items-center justify-center hidden backdrop-blur-sm">
-        <i class="fas fa-circle-notch fa-spin text-4xl text-white mb-4"></i>
-        <p class="text-white text-lg font-medium tracking-wide">กำลังประมวลผลข้อมูล...</p>
+<body>
+  <div id="loadingOverlay" class="loading-overlay is-hidden">
+    <div class="loading-card">
+      <div class="spinner"></div>
+      <div>
+        <strong>กำลังโหลดข้อมูล</strong>
+        <span>กรุณารอสักครู่</span>
+      </div>
     </div>
+  </div>
 
-    <nav class="bg-primary text-white shadow-lg sticky top-0 z-40">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div class="flex justify-between h-16">
-                <div class="flex items-center gap-3">
-                    <i class="fas fa-hospital text-2xl text-blue-200"></i>
-                    <span class="font-bold text-xl tracking-wide">MedLabel Pro</span>
-                </div>
-                <div class="flex items-center gap-4">
-                    <button onclick="switchTab('print')" class="hover:text-blue-200 transition-colors font-medium"><i class="fas fa-print mr-2"></i>พิมพ์สติ๊กเกอร์</button>
-                    <button onclick="switchTab('manage')" class="hover:text-blue-200 transition-colors font-medium"><i class="fas fa-box mr-2"></i>จัดการรายการ</button>
-                </div>
-            </div>
-        </div>
+  <div id="toastRegion" class="toast-region" aria-live="polite"></div>
+
+  <header class="app-header">
+    <nav class="topbar">
+      <button class="brand" type="button" data-tab="print" aria-label="หน้าแรก">
+        <img src="icon.png" alt="" class="brand-icon">
+        <span>
+          <strong>ระบบพิมพ์สติ๊กเกอร์วันหมดอายุ</strong>
+          <small>น้ำยา / สารน้ำ / ยาเย็น</small>
+        </span>
+      </button>
+
+      <div class="nav-actions">
+        <button class="nav-tab is-active" type="button" data-tab="print">พิมพ์สติ๊กเกอร์</button>
+        <button class="nav-tab" type="button" data-tab="manage">จัดการรายการ</button>
+      </div>
     </nav>
+  </header>
 
-    <main class="flex-grow max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full">
-        
-        <section id="tab-print" class="block">
-            <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-                <h2 class="text-2xl font-bold text-slate-800 border-b pb-4 mb-6"><i class="fas fa-search-plus mr-3 text-secondary"></i>ค้นหาและพิมพ์สติ๊กเกอร์</h2>
-                
-                <div class="mb-6 relative">
-                    <input type="text" id="searchInput" onkeyup="filterItems()" placeholder="ค้นหาชื่อน้ำยา, สารน้ำ, ยาเย็น..." 
-                           class="w-full pl-12 pr-4 py-3 rounded-lg border border-slate-300 focus:ring-2 focus:ring-secondary focus:border-secondary transition-shadow text-lg">
-                    <i class="fas fa-search absolute left-4 top-4 text-slate-400 text-lg"></i>
-                </div>
+  <main class="app-shell">
+    <section class="hero">
+      <div>
+        <h1>พิมพ์สติ๊กเกอร์วันหมดอายุ</h1>
+        <p>เลือกรายการ กรอกวันเปิดใช้งาน ระบบคำนวณวันหมดอายุและพิมพ์สติ๊กเกอร์ 2×1 นิ้ว</p>
+      </div>
+      <button id="refreshBtn" class="btn btn-ghost" type="button">รีเฟรช</button>
+    </section>
 
-                <div id="itemsGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    </div>
-            </div>
-        </section>
-
-        <section id="tab-manage" class="hidden">
-            <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-                <div class="flex justify-between items-center border-b pb-4 mb-6">
-                    <h2 class="text-2xl font-bold text-slate-800"><i class="fas fa-database mr-3 text-secondary"></i>ฐานข้อมูลรายการ</h2>
-                    <button onclick="openModal('addItemModal')" class="bg-secondary hover:bg-primary text-white px-5 py-2 rounded-lg font-medium transition-colors shadow-md">
-                        <i class="fas fa-plus mr-2"></i>เพิ่มรายการใหม่
-                    </button>
-                </div>
-                <div class="overflow-x-auto">
-                    <table class="min-w-full divide-y divide-slate-200">
-                        <thead class="bg-slate-50">
-                            <tr>
-                                <th class="px-6 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">ชื่อรายการ</th>
-                                <th class="px-6 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">ประเภท</th>
-                                <th class="px-6 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">อายุหลังเปิด</th>
-                            </tr>
-                        </thead>
-                        <tbody id="manageTableBody" class="bg-white divide-y divide-slate-200">
-                            </tbody>
-                    </table>
-                </div>
-            </div>
-        </section>
-    </main>
-
-    <footer class="bg-white border-t border-slate-200 py-6 mt-auto">
-        <div class="max-w-7xl mx-auto px-4 text-center text-slate-500 text-sm font-medium">
-            © 2026 Developed By Natnarinthorn | Enterprise Healthcare System
+    <section id="printView" class="view is-active">
+      <div class="panel">
+        <div class="toolbar">
+          <label class="search-box">
+            <span class="sr-only">ค้นหารายการ</span>
+            <input id="homeSearch" type="search" placeholder="ค้นหารายการ...">
+          </label>
+          <div id="categoryFilters" class="segmented"></div>
         </div>
-    </footer>
 
-    <div id="printModal" class="fixed inset-0 bg-slate-900 bg-opacity-50 z-50 hidden items-center justify-center backdrop-blur-sm">
-        <div class="bg-white rounded-xl shadow-2xl w-full max-w-4xl flex flex-col md:flex-row overflow-hidden max-h-[90vh]">
-            <div class="p-8 w-full md:w-1/2 border-b md:border-b-0 md:border-r border-slate-200 overflow-y-auto">
-                <div class="flex justify-between items-center mb-6">
-                    <h3 class="text-xl font-bold text-slate-800">ข้อมูลการเปิดใช้งาน</h3>
-                    <button onclick="closeModal('printModal')" class="text-slate-400 hover:text-red-500"><i class="fas fa-times text-xl"></i></button>
-                </div>
-                
-                <h4 id="selectedItemName" class="text-lg font-semibold text-primary mb-2"></h4>
-                <p id="selectedItemRule" class="text-sm text-slate-500 mb-6 bg-slate-50 p-3 rounded-md border border-slate-100"></p>
-
-                <div class="space-y-5">
-                    <div>
-                        <label class="block text-sm font-bold text-slate-700 mb-1">วันที่เปิดใช้งาน</label>
-                        <input type="date" id="openDate" onchange="calculatePreview()" class="w-full px-4 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-secondary">
-                    </div>
-                    <div>
-                        <label class="block text-sm font-bold text-slate-700 mb-1">เวลาเปิดใช้งาน</label>
-                        <input type="time" id="openTime" onchange="calculatePreview()" class="w-full px-4 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-secondary">
-                    </div>
-                    
-                    <div id="manualExpireDiv" class="hidden">
-                        <label class="block text-sm font-bold text-red-600 mb-1">ระบุวันหมดอายุ (ตามสลาก)</label>
-                        <input type="date" id="manualExpireDate" onchange="calculatePreview()" class="w-full px-4 py-2 rounded-lg border border-red-300 focus:ring-2 focus:ring-red-500">
-                    </div>
-                </div>
-            </div>
-
-            <div class="p-8 w-full md:w-1/2 bg-slate-50 flex flex-col items-center justify-center">
-                <h3 class="text-lg font-bold text-slate-700 mb-4">ตัวอย่างสติ๊กเกอร์ (2x1 นิ้ว)</h3>
-                
-                <div class="label-preview bg-white shadow-md border border-slate-300 p-2 relative" id="printableArea">
-                    <div class="label-content border-2 border-black p-1 h-full flex flex-col justify-between">
-                        <div class="text-[12px] font-bold leading-tight line-clamp-2" id="lbl-name">-</div>
-                        <div class="flex justify-between items-center text-[9px] mt-1 border-t border-dashed border-gray-400 pt-1">
-                            <span><b>เปิด:</b> <span id="lbl-open-date">-</span></span>
-                            <span><span id="lbl-open-time">-</span></span>
-                        </div>
-                        <div class="flex justify-between items-center text-[10px] mt-1 bg-black text-white px-1">
-                            <span><b>หมดอายุ:</b> <span id="lbl-exp-date">-</span></span>
-                            <span><span id="lbl-exp-time">-</span></span>
-                        </div>
-                        <div class="text-[8px] text-center mt-1" id="lbl-details"></div>
-                    </div>
-                </div>
-
-                <div class="mt-8 w-full">
-                    <button onclick="executePrint()" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-lg shadow-lg transition-colors flex justify-center items-center gap-2 text-lg">
-                        <i class="fas fa-print"></i> พิมพ์สติ๊กเกอร์
-                    </button>
-                </div>
-            </div>
+        <div id="itemsSkeleton" class="items-grid skeleton-grid"></div>
+        <div id="itemsGrid" class="items-grid"></div>
+        <div id="itemsEmpty" class="empty-state is-hidden">
+          <strong>ไม่พบรายการ</strong>
+          <span>ลองเปลี่ยนคำค้นหรือประเภท</span>
         </div>
+      </div>
+    </section>
+
+    <section id="manageView" class="view">
+      <div class="panel">
+        <div class="panel-header">
+          <h2>จัดการรายการ</h2>
+          <button id="addItemBtn" class="btn btn-primary" type="button">+ เพิ่มรายการ</button>
+        </div>
+
+        <div class="toolbar">
+          <label class="search-box">
+            <span class="sr-only">ค้นหาในหน้าจัดการ</span>
+            <input id="manageSearch" type="search" placeholder="ค้นหารายการเพื่อแก้ไขหรือลบ...">
+          </label>
+          <select id="manageCategoryFilter" class="control compact">
+            <option value="all">ทุกประเภท</option>
+          </select>
+        </div>
+
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>รายการ</th>
+                <th>ประเภท</th>
+                <th>อายุหลังเปิด</th>
+                <th>การเก็บรักษา</th>
+                <th class="align-right">จัดการ</th>
+              </tr>
+            </thead>
+            <tbody id="manageTableBody"></tbody>
+          </table>
+        </div>
+        <div id="manageEmpty" class="empty-state is-hidden">
+          <strong>ยังไม่มีข้อมูล</strong>
+          <span>เพิ่มรายการแรกเพื่อเริ่มใช้งาน</span>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="app-footer">© 2026 Developed By Natnarinthorn</footer>
+
+  <section id="printModal" class="modal" aria-hidden="true">
+    <div class="modal-backdrop" data-close-modal></div>
+    <div class="modal-dialog print-dialog" role="dialog" aria-modal="true">
+      <header class="modal-header">
+        <h2>ตัวอย่างก่อนพิมพ์</h2>
+        <button class="icon-btn" type="button" data-close-modal aria-label="ปิด">×</button>
+      </header>
+
+      <div class="print-modal-body">
+        <form id="printForm" class="form-stack">
+          <div class="selected-item">
+            <img id="selectedItemImage" src="icon.png" alt="">
+            <div>
+              <strong id="selectedItemName">-</strong>
+              <span id="selectedItemMeta">-</span>
+            </div>
+          </div>
+
+          <div class="form-grid two">
+            <label class="field">
+              <span>วันที่เปิดใช้งาน</span>
+              <input id="openDate" class="control" type="date" required>
+              <small id="openDateThai">-</small>
+            </label>
+            <label class="field">
+              <span>เวลาเปิดใช้งาน</span>
+              <input id="openTime" class="control" type="time" required>
+              <small id="openTimeThai">-</small>
+            </label>
+          </div>
+
+          <div id="manualExpiryFields" class="manual-expiry is-hidden">
+            <p>รายการนี้หมดอายุตามสลากข้างขวด</p>
+            <div class="form-grid two">
+              <label class="field">
+                <span>วันที่หมดอายุ</span>
+                <input id="manualExpireDate" class="control" type="date">
+                <small id="manualExpireDateThai">-</small>
+              </label>
+              <label class="field">
+                <span>เวลาหมดอายุ</span>
+                <input id="manualExpireTime" class="control" type="time">
+              </label>
+            </div>
+          </div>
+
+          <div class="calculation-summary">
+            <span>วันหมดอายุ</span>
+            <strong id="expirySummary">-</strong>
+          </div>
+        </form>
+
+        <aside class="label-stage">
+          <div id="printableArea" class="thermal-label">
+            <div class="label-topline">
+              <span>EXPIRATION LABEL</span>
+              <span id="labelCategory">-</span>
+            </div>
+            <div id="labelItemName" class="label-name">-</div>
+            <div class="label-row">
+              <span>เปิด</span>
+              <strong id="labelOpenDate">-</strong>
+              <strong id="labelOpenTime">-</strong>
+            </div>
+            <div class="label-row label-expiry">
+              <span>หมดอายุ</span>
+              <strong id="labelExpireDate">-</strong>
+              <strong id="labelExpireTime">-</strong>
+            </div>
+            <div class="label-foot">
+              <span id="labelShelfLife">-</span>
+              <span id="labelDetails">-</span>
+            </div>
+          </div>
+
+          <div class="modal-actions">
+            <button id="closePrintBtn" class="btn btn-ghost" type="button">ยกเลิก</button>
+            <button id="printBtn" class="btn btn-success" type="button">พิมพ์</button>
+          </div>
+        </aside>
+      </div>
     </div>
-    
-    <div id="addItemModal" class="fixed inset-0 bg-slate-900 bg-opacity-50 z-50 hidden items-center justify-center backdrop-blur-sm p-4">
-        <div class="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden">
-            <div class="flex justify-between items-center p-5 border-b border-slate-200 bg-slate-50 shrink-0">
-                <h3 class="text-xl font-bold text-slate-800"><i class="fas fa-plus-circle text-secondary mr-2"></i>เพิ่มรายการใหม่</h3>
-                <button onclick="closeModal('addItemModal')" class="text-slate-400 hover:text-red-500 transition-colors"><i class="fas fa-times text-xl"></i></button>
-            </div>
-            
-            <div class="p-6 space-y-5 overflow-y-auto flex-grow">
-                <div>
-                    <label class="block text-sm font-bold text-slate-700 mb-2">รูปภาพเวชภัณฑ์ (อัพโหลด)</label>
-                    <div class="flex items-center justify-center w-full">
-                        <label for="newItemImage" class="flex flex-col items-center justify-center w-full h-40 border-2 border-slate-300 border-dashed rounded-lg cursor-pointer bg-slate-50 hover:bg-slate-100 transition-colors relative overflow-hidden group">
-                            <div id="imageUploadPlaceholder" class="flex flex-col items-center justify-center pt-5 pb-6">
-                                <i class="fas fa-cloud-upload-alt text-4xl text-slate-400 mb-3 group-hover:text-secondary transition-colors"></i>
-                                <p class="text-sm text-slate-500 font-medium">คลิกเพื่ออัพโหลดรูปภาพ</p>
-                                <p class="text-xs text-slate-400 mt-1">รองรับ JPG, PNG (ระบบจะย่อขนาดให้อัตโนมัติ)</p>
-                            </div>
-                            <img id="imagePreview" class="hidden absolute inset-0 w-full h-full object-cover" />
-                            <input id="newItemImage" type="file" class="hidden" accept="image/*" onchange="handleImageUpload(event)" />
-                        </label>
-                    </div>
-                </div>
+  </section>
 
-                <div>
-                    <label class="block text-sm font-bold text-slate-700 mb-1">ชื่อรายการ</label>
-                    <input type="text" id="newItemName" placeholder="เช่น Normal Saline, ยาชา" class="w-full px-4 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-secondary outline-none">
-                </div>
-                <div>
-                    <label class="block text-sm font-bold text-slate-700 mb-1">ประเภท</label>
-                    <select id="newItemCategory" class="w-full px-4 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-secondary outline-none">
-                        <option value="น้ำยา">น้ำยา</option>
-                        <option value="สารน้ำ">สารน้ำ</option>
-                        <option value="ยาเย็น">ยาเย็น</option>
-                        <option value="เวชภัณฑ์อื่นๆ">เวชภัณฑ์อื่นๆ</option>
-                    </select>
-                </div>
-                <div class="flex gap-4">
-                    <div class="w-1/2">
-                        <label class="block text-sm font-bold text-slate-700 mb-1">อายุหลังเปิด</label>
-                        <input type="number" id="newItemLifeValue" placeholder="ตัวเลข" class="w-full px-4 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-secondary outline-none">
-                    </div>
-                    <div class="w-1/2">
-                        <label class="block text-sm font-bold text-slate-700 mb-1">หน่วย</label>
-                        <select id="newItemLifeUnit" class="w-full px-4 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-secondary outline-none">
-                            <option value="วัน">วัน</option>
-                            <option value="เดือน">เดือน</option>
-                            <option value="ปี">ปี</option>
-                            <option value="ตามสลาก">ตามสลากข้างขวด</option>
-                        </select>
-                    </div>
-                </div>
-                <div>
-                    <label class="block text-sm font-bold text-slate-700 mb-1">วิธีการเก็บรักษา</label>
-                    <input type="text" id="newItemStorage" placeholder="เช่น อุณหภูมิห้อง, ตู้เย็น 2-8°C" class="w-full px-4 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-secondary outline-none">
-                </div>
-            </div>
-            
-            <div class="p-5 border-t border-slate-200 bg-slate-50 flex justify-end gap-3 shrink-0">
-                <button onclick="closeModal('addItemModal')" class="px-5 py-2 rounded-lg font-medium text-slate-600 hover:bg-slate-200 transition-colors">ยกเลิก</button>
-                <button onclick="saveNewItem()" class="bg-secondary hover:bg-primary text-white px-6 py-2 rounded-lg font-bold shadow-md transition-colors flex items-center gap-2">
-                    <i class="fas fa-save"></i> บันทึกข้อมูล
-                </button>
-            </div>
+  <section id="itemModal" class="modal" aria-hidden="true">
+    <div class="modal-backdrop" data-close-modal></div>
+    <div class="modal-dialog item-dialog" role="dialog" aria-modal="true">
+      <header class="modal-header">
+        <h2 id="itemModalTitle">เพิ่มรายการ</h2>
+        <button class="icon-btn" type="button" data-close-modal aria-label="ปิด">×</button>
+      </header>
+
+      <form id="itemForm" class="item-form">
+        <input id="itemId" type="hidden">
+
+        <div class="image-uploader">
+          <label for="itemImage" class="image-dropzone">
+            <img id="itemImagePreview" class="is-hidden" alt="ตัวอย่างรูป">
+            <span id="imageDropHint">
+              <strong>อัปโหลดรูปรายการ</strong>
+              <small>ระบบจะย่อรูปให้เหมาะกับ Google Sheets</small>
+            </span>
+          </label>
+          <input id="itemImage" type="file" accept="image/*">
+          <button id="clearImageBtn" class="btn btn-ghost compact" type="button">ล้างรูป</button>
         </div>
-    </div>
 
-    <script src="app.js"></script>
+        <div class="form-grid two">
+          <label class="field">
+            <span>ชื่อรายการ *</span>
+            <input id="itemName" class="control" type="text" required placeholder="เช่น Normal Saline">
+          </label>
+          <label class="field">
+            <span>ประเภท *</span>
+            <select id="itemCategory" class="control" required>
+              <option value="น้ำยา">น้ำยา</option>
+              <option value="สารน้ำ">สารน้ำ</option>
+              <option value="ยาเย็น">ยาเย็น</option>
+              <option value="ยาน้ำ">ยาน้ำ</option>
+              <option value="สารละลาย">สารละลาย</option>
+              <option value="other">อื่นๆ ระบุ</option>
+            </select>
+          </label>
+        </div>
+
+        <label id="customCategoryField" class="field is-hidden">
+          <span>ระบุประเภทอื่นๆ *</span>
+          <input id="customCategory" class="control" type="text" placeholder="เช่น เวชภัณฑ์เฉพาะทาง">
+        </label>
+
+        <div class="form-grid two">
+          <label class="field">
+            <span>อายุหลังเปิด</span>
+            <input id="shelfLifeValue" class="control" type="number" min="1" step="1" placeholder="เช่น 7">
+          </label>
+          <label class="field">
+            <span>หน่วย</span>
+            <select id="shelfLifeUnit" class="control">
+              <option value="day">วัน</option>
+              <option value="month">เดือน</option>
+              <option value="year">ปี</option>
+              <option value="label">หมดอายุตามสลากข้างขวด</option>
+            </select>
+          </label>
+        </div>
+
+        <label class="field">
+          <span>วิธีการเก็บรักษา</span>
+          <input id="storageMethod" class="control" type="text" placeholder="เช่น ตู้เย็น 2–8°C">
+        </label>
+
+        <label class="field">
+          <span>รายละเอียดเพิ่มเติม</span>
+          <textarea id="itemDetails" class="control" rows="3"></textarea>
+        </label>
+
+        <div class="modal-actions">
+          <button class="btn btn-ghost" type="button" data-close-modal>ยกเลิก</button>
+          <button class="btn btn-primary" type="submit">บันทึก</button>
+        </div>
+      </form>
+    </div>
+  </section>
+
+  <section id="confirmModal" class="modal" aria-hidden="true">
+    <div class="modal-backdrop" data-close-modal></div>
+    <div class="modal-dialog confirm-dialog" role="dialog" aria-modal="true">
+      <header class="modal-header">
+        <h2>ยืนยันการลบ</h2>
+        <button class="icon-btn" type="button" data-close-modal aria-label="ปิด">×</button>
+      </header>
+      <p id="confirmMessage" class="confirm-message">ต้องการลบรายการนี้หรือไม่?</p>
+      <div class="modal-actions confirm-actions">
+        <button id="cancelDeleteBtn" class="btn btn-ghost" type="button">ยกเลิก</button>
+        <button id="confirmDeleteBtn" class="btn btn-danger" type="button">ลบ</button>
+      </div>
+    </div>
+  </section>
+
+  <script src="app.js"></script>
 </body>
 </html>
