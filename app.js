@@ -216,3 +216,94 @@ function getIconByCategory(category) {
     if(category.includes('สารน้ำ')) return 'tint';
     return 'box';
 }
+// ==========================================
+// Item Management & Form Saving
+// ==========================================
+
+// เรนเดอร์ข้อมูลลงในตารางหน้าจัดการรายการ
+function renderManageTable(items) {
+    const tbody = document.getElementById('manageTableBody');
+    if (!tbody) return;
+    
+    tbody.innerHTML = '';
+    
+    if(items.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="3" class="px-6 py-4 text-center text-slate-500">ยังไม่มีข้อมูลในระบบ</td></tr>`;
+        return;
+    }
+
+    items.forEach(item => {
+        const tr = document.createElement('tr');
+        tr.className = "hover:bg-slate-50 transition-colors";
+        tr.innerHTML = `
+            <td class="px-6 py-4 whitespace-nowrap text-sm font-bold text-slate-800">${item.ItemName}</td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-600">
+                <span class="px-2 py-1 bg-slate-100 rounded-full text-xs">${item.Category}</span>
+            </td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-secondary font-medium">
+                ${item.ShelfLifeUnit === 'ตามสลาก' ? 'ตามสลาก' : item.ShelfLifeValue + ' ' + item.ShelfLifeUnit}
+            </td>
+        `;
+        tbody.appendChild(tr);
+    });
+}
+
+// ฟังก์ชันบันทึกข้อมูลรายการใหม่ไปยัง Google Sheets
+async function saveNewItem() {
+    const itemName = document.getElementById('newItemName').value;
+    const category = document.getElementById('newItemCategory').value;
+    const shelfLifeValue = document.getElementById('newItemLifeValue').value || '-';
+    const shelfLifeUnit = document.getElementById('newItemLifeUnit').value;
+    const storageMethod = document.getElementById('newItemStorage').value || '-';
+
+    if(!itemName) {
+        showToast('กรุณากรอกชื่อรายการด้วยครับ', 'error');
+        return;
+    }
+    
+    if(shelfLifeUnit !== 'ตามสลาก' && (shelfLifeValue === '-' || shelfLifeValue <= 0)) {
+        showToast('กรุณาระบุอายุหลังเปิดใช้งานให้ถูกต้อง', 'error');
+        return;
+    }
+
+    closeModal('addItemModal');
+    showLoading(true);
+
+    const payload = {
+        action: 'addItem',
+        data: {
+            itemName: itemName,
+            category: category,
+            imageURL: '',
+            storageMethod: storageMethod,
+            shelfLifeUnit: shelfLifeUnit,
+            shelfLifeValue: shelfLifeValue,
+            details: ''
+        }
+    };
+
+    try {
+        const response = await fetch(GAS_API_URL, {
+            method: 'POST',
+            body: JSON.stringify(payload),
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' }
+        });
+        
+        const result = await response.json();
+        if(result.status === 'success') {
+            showToast('บันทึกรายการใหม่สำเร็จ', 'success');
+            // รีเซ็ตฟอร์ม
+            document.getElementById('newItemName').value = '';
+            document.getElementById('newItemLifeValue').value = '';
+            document.getElementById('newItemStorage').value = '';
+            // โหลดข้อมูลใหม่จาก Sheets
+            fetchItems(); 
+        } else {
+            showToast('ไม่สามารถบันทึกได้: ' + result.message, 'error');
+        }
+    } catch (error) {
+        showToast('เกิดข้อผิดพลาดในการเชื่อมต่อกับเซิร์ฟเวอร์', 'error');
+    } finally {
+        showLoading(false);
+    }
+}
