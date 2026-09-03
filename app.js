@@ -1,8 +1,4 @@
-// === ตั้งค่า Supabase ===
-const SUPABASE_URL = "https://aavqpgxkldpjfijwputl.supabase.co";
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFhdnFwZ3hrbGRwamZpandwdXRsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODgzOTQxMzksImV4cCI6MjEwMzk3MDEzOX0.bO4y8-sPHbg7fL3k71rxCzLQJznK3j2prqK-bUXDANk";
-const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
+const GAS_API_URL = "https://script.google.com/macros/s/AKfycbxzDMcrJwOGIVv9rH8pJ4IwagNeUziG4V8-UfZFt574gnzG0c_rDyaZLhpzfAfk_sf8/exec";
 const CACHE_KEY = "medlabel.items.cache.v1";
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const DEFAULT_ICON = "icon.png";
@@ -72,21 +68,13 @@ function bindEvents() {
   });
 }
 
-// === เปลี่ยนการดึงข้อมูลมาใช้ Supabase ===
 async function loadItems({ quiet = false } = {}) {
   if (!quiet) showLoading(true);
   setSkeletonVisible(!state.items.length);
 
   try {
-    const { data, error } = await supabaseClient
-      .from('master_items')
-      .select('*')
-      .eq('is_active', true)
-      .order('created_at', { ascending: false });
-
-    if (error) throw error;
-    
-    setItems(data || []);
+    const result = await apiGet("getItems");
+    setItems(result.data || []);
     renderAll();
     if (!quiet) showToast("โหลดข้อมูลล่าสุดแล้ว", "success");
   } catch (error) {
@@ -284,7 +272,6 @@ function syncThaiDateHelpers() {
   qs("#manualExpireDateThai").textContent = formatThaiDate(qs("#manualExpireDate").value);
 }
 
-// === เปลี่ยนการเก็บประวัติพิมพ์ไปใช้ Supabase ===
 async function executePrint() {
   const item = state.selectedItem;
   if (!item || qs("#labelExpireDate").textContent === "-") {
@@ -292,21 +279,17 @@ async function executePrint() {
     return;
   }
 
-  try {
-    await supabaseClient.from('print_history').insert([{
-      item_id: item.id,
-      item_name: item.itemName,
-      open_date: qs("#labelOpenDate").textContent,
-      open_time: qs("#labelOpenTime").textContent,
-      expire_date: qs("#labelExpireDate").textContent,
-      expire_time: qs("#labelExpireTime").textContent,
-      shelf_life_text: formatShelfLife(item),
-      details: item.details || "",
-      client_info: navigator.userAgent
-    }]);
-  } catch (error) {
-    showToast("บันทึกประวัติพิมพ์ไม่สำเร็จ", "warning", error.message);
-  }
+  apiPost("logPrint", {
+    itemId: item.id,
+    itemName: item.itemName,
+    openDate: qs("#labelOpenDate").textContent,
+    openTime: qs("#labelOpenTime").textContent,
+    expireDate: qs("#labelExpireDate").textContent,
+    expireTime: qs("#labelExpireTime").textContent,
+    shelfLifeText: formatShelfLife(item),
+    details: item.details || "",
+    clientInfo: navigator.userAgent
+  }).catch((error) => showToast("บันทึกประวัติพิมพ์ไม่สำเร็จ", "warning", error.message));
 
   window.print();
   showToast("ส่งคำสั่งพิมพ์แล้ว", "success");
@@ -401,50 +384,34 @@ function clearImage() {
   qs("#imageDropHint").classList.remove("is-hidden");
 }
 
-// === เปลี่ยนการบันทึกรายการไปใช้ Supabase ===
 async function saveItem(event) {
   event.preventDefault();
   const isLabel = qs("#shelfLifeUnit").value === "label";
   const category = qs("#itemCategory").value === "other"
     ? qs("#customCategory").value.trim()
     : qs("#itemCategory").value;
-  
-  const id = qs("#itemId").value;
-  const itemName = qs("#itemName").value.trim();
-  
-  if (!itemName) return showToast("กรุณากรอกชื่อรายการ", "warning");
-  if (!category) return showToast("กรุณาระบุประเภท", "warning");
-  
-  const shelfLifeValue = isLabel ? null : Number(qs("#shelfLifeValue").value);
-  if (!isLabel && (!shelfLifeValue || shelfLifeValue < 1)) {
+  const payload = {
+    id: qs("#itemId").value,
+    itemName: qs("#itemName").value.trim(),
+    category,
+    imageURL: state.imageData,
+    details: qs("#itemDetails").value.trim(),
+    storageMethod: qs("#storageMethod").value.trim(),
+    shelfLifeValue: isLabel ? "" : Number(qs("#shelfLifeValue").value),
+    shelfLifeUnit: qs("#shelfLifeUnit").value
+  };
+
+  if (!payload.itemName) return showToast("กรุณากรอกชื่อรายการ", "warning");
+  if (!payload.category) return showToast("กรุณาระบุประเภท", "warning");
+  if (!isLabel && (!payload.shelfLifeValue || payload.shelfLifeValue < 1)) {
     return showToast("กรุณาระบุอายุหลังเปิด", "warning");
   }
 
-  const dbPayload = {
-    item_name: itemName,
-    category: category,
-    image_url: state.imageData,
-    details: qs("#itemDetails").value.trim(),
-    storage_method: qs("#storageMethod").value.trim(),
-    shelf_life_value: shelfLifeValue,
-    shelf_life_unit: qs("#shelfLifeUnit").value,
-    updated_at: new Date().toISOString()
-  };
-
   showLoading(true);
   try {
-    if (id) {
-      // แก้ไขข้อมูล
-      const { error } = await supabaseClient.from('master_items').update(dbPayload).eq('id', id);
-      if (error) throw error;
-    } else {
-      // เพิ่มข้อมูลใหม่
-      const { error } = await supabaseClient.from('master_items').insert([dbPayload]);
-      if (error) throw error;
-    }
-    
+    await apiPost(payload.id ? "updateItem" : "addItem", payload);
     closeModal("itemModal");
-    showToast(id ? "แก้ไขรายการแล้ว" : "เพิ่มรายการแล้ว", "success");
+    showToast(payload.id ? "แก้ไขรายการแล้ว" : "เพิ่มรายการแล้ว", "success");
     await loadItems({ quiet: true });
   } catch (error) {
     showToast("บันทึกไม่สำเร็จ", "error", error.message);
@@ -459,19 +426,11 @@ function openDeleteConfirm(item) {
   openModal("confirmModal");
 }
 
-// === เปลี่ยนการลบรายการไปใช้ Supabase (Soft Delete) ===
 async function deleteSelectedItem() {
   if (!state.pendingDeleteId) return;
   showLoading(true);
   try {
-    // เปลี่ยน is_active เป็น false แทนการลบแบบถาวร เพื่อไม่ให้กระทบประวัติ
-    const { error } = await supabaseClient
-      .from('master_items')
-      .update({ is_active: false })
-      .eq('id', state.pendingDeleteId);
-      
-    if (error) throw error;
-
+    await apiPost("deleteItem", { id: state.pendingDeleteId });
     state.pendingDeleteId = "";
     closeModal("confirmModal");
     showToast("ลบรายการแล้ว", "success");
@@ -483,7 +442,6 @@ async function deleteSelectedItem() {
   }
 }
 
-// แปลงรูปแบบคอลัมน์ของ Supabase (snake_case) ให้เป็น Object แบบเดิมที่ UI คุ้นเคย
 function setItems(items) {
   state.items = Array.isArray(items) ? items.map(normalizeItem) : [];
   sessionStorage.setItem(CACHE_KEY, JSON.stringify({ savedAt: Date.now(), items: state.items }));
@@ -493,7 +451,7 @@ function getCachedItems() {
   try {
     const cached = JSON.parse(sessionStorage.getItem(CACHE_KEY) || "null");
     if (!cached || Date.now() - cached.savedAt > CACHE_TTL_MS) return [];
-    return cached.items;
+    return cached.items.map(normalizeItem);
   } catch {
     return [];
   }
@@ -501,23 +459,31 @@ function getCachedItems() {
 
 function normalizeItem(raw) {
   return {
-    id: String(raw.id || ""),
-    itemName: String(raw.item_name || ""),
-    category: String(raw.category || "อื่นๆ ระบุ"),
-    imageURL: String(raw.image_url || ""),
-    details: String(raw.details || ""),
-    storageMethod: String(raw.storage_method || ""),
-    shelfLifeValue: raw.shelf_life_value || "",
-    shelfLifeUnit: normalizeUnit(raw.shelf_life_unit)
+    id: String(raw.id || raw.Id || raw.ID || ""),
+    itemName: String(raw.itemName || raw.ItemName || ""),
+    category: String(raw.category || raw.Category || "อื่นๆ ระบุ"),
+    imageURL: String(raw.imageURL || raw.ImageURL || raw.imageUrl || raw.ImageUrl || ""),
+    details: String(raw.details || raw.Details || ""),
+    storageMethod: String(raw.storageMethod || raw.StorageMethod || ""),
+    shelfLifeValue: raw.shelfLifeValue || raw.ShelfLifeValue || "",
+    shelfLifeUnit: normalizeUnit(raw.shelfLifeUnit || raw.ShelfLifeUnit)
   };
 }
 
 function normalizeUnit(unit) {
   const map = {
-    "วัน": "day", day: "day", days: "day",
-    "เดือน": "month", month: "month", months: "month",
-    "ปี": "year", year: "year", years: "year",
-    "ตามสลาก": "label", "หมดอายุตามสลากข้างขวด": "label", label: "label"
+    "วัน": "day",
+    day: "day",
+    days: "day",
+    "เดือน": "month",
+    month: "month",
+    months: "month",
+    "ปี": "year",
+    year: "year",
+    years: "year",
+    "ตามสลาก": "label",
+    "หมดอายุตามสลากข้างขวด": "label",
+    label: "label"
   };
   return map[String(unit || "day").trim()] || String(unit || "day").trim();
 }
@@ -533,6 +499,29 @@ function filterItems(query, category) {
 
 function getCategories() {
   return [...new Set([...DEFAULT_CATEGORIES, ...state.items.map((item) => item.category).filter(Boolean)])];
+}
+
+async function apiGet(action, params = {}) {
+  const url = new URL(GAS_API_URL);
+  url.searchParams.set("action", action);
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== "") url.searchParams.set(key, value);
+  });
+  return parseApiResponse(await fetch(url.toString(), { method: "GET" }));
+}
+
+async function apiPost(action, data = {}) {
+  return parseApiResponse(await fetch(GAS_API_URL, {
+    method: "POST",
+    body: JSON.stringify({ action, data }),
+    headers: { "Content-Type": "text/plain;charset=utf-8" }
+  }));
+}
+
+async function parseApiResponse(response) {
+  const payload = await response.json();
+  if (!response.ok || payload.status === "error") throw new Error(payload.message || "API error");
+  return payload;
 }
 
 function openModal(id) {
